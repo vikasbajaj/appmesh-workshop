@@ -1,0 +1,87 @@
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name to link stacks
+
+Resources:
+  Mesh:
+    Type: AWS::AppMesh::Mesh
+    Properties:
+      MeshName: !Sub '${ProjectName}-mesh'
+      Spec:
+        EgressFilter: 
+          Type: ALLOW_ALL
+
+  EnquiryNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties:
+      MeshName: !GetAtt Mesh.MeshName
+      VirtualNodeName: enquiry-vn
+      Spec:
+        Backends:
+        - VirtualService:
+            VirtualServiceName: !Sub 'dealer.versionone.${ProjectName}.local'
+        - VirtualService:
+            VirtualServiceName: !Sub 'dummy.restapiexample.com'
+        Listeners:
+        - PortMapping:
+            Port: 8081
+            Protocol: http
+        ServiceDiscovery:
+          DNS:
+            Hostname: !Sub 'enquiry.${ProjectName}.local'
+  
+  ExternalNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties:
+      MeshName: !GetAtt Mesh.MeshName
+      VirtualNodeName: external-vn
+      Spec:
+        Listeners:
+        - PortMapping:
+            Port: 80
+            Protocol: tcp
+        ServiceDiscovery:
+          DNS:
+            Hostname: 'dummy.restapiexample.com'
+
+  VirtualRouter:
+    Type: AWS::AppMesh::VirtualRouter
+    Properties:
+      MeshName: !GetAtt Mesh.MeshName
+      VirtualRouterName: external-vr
+      Spec:
+        Listeners:
+        - PortMapping:
+            Port: 80
+            Protocol: tcp
+  
+  VirtualService:
+    DependsOn:
+     - VirtualRouter
+    Type: AWS::AppMesh::VirtualService
+    Properties:
+      MeshName: !GetAtt Mesh.MeshName
+      VirtualServiceName: 'dummy.restapiexample.com'
+      Spec:
+        Provider:
+          VirtualRouter:
+            VirtualRouterName: external-vr
+  
+  Route:
+    DependsOn:
+     - VirtualRouter
+     - ExternalNode
+    Type: AWS::AppMesh::Route
+    Properties:
+      MeshName: !GetAtt Mesh.MeshName
+      VirtualRouterName: external-vr
+      RouteName: weighted-route
+      Spec:
+        HttpRoute:
+          Action:
+            WeightedTargets:
+            - VirtualNode: external-vn
+              Weight: 1
+          Match:
+            Prefix: /

@@ -1,0 +1,67 @@
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name to link stacks
+  MeshName:
+    Type: String
+    Description: Name of the shared mesh
+  MeshOwner:
+    Type: String
+    Description: Account Id of the owner of the mesh
+
+Resources:
+  EmailNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties:
+      MeshName: !Ref MeshName
+      MeshOwner: !Ref MeshOwner
+      VirtualNodeName: email-vn
+      Spec:
+        Listeners:
+        - PortMapping:
+            Port: 8083
+            Protocol: http
+        ServiceDiscovery:
+          DNS:
+            Hostname: !Sub "notification.secondary.${ProjectName}.local"
+  VirtualRouter:
+    Type: AWS::AppMesh::VirtualRouter
+    Properties:
+      MeshName: !Ref MeshName
+      MeshOwner: !Ref MeshOwner
+      VirtualRouterName: email-vr
+      Spec:
+        Listeners:
+        - PortMapping:
+            Port: 8083
+            Protocol: http
+  VirtualService:
+    DependsOn:
+     - VirtualRouter
+    Type: AWS::AppMesh::VirtualService
+    Properties:
+      MeshName: !Ref MeshName
+      MeshOwner: !Ref MeshOwner
+      VirtualServiceName: !Sub 'notification.secondary.${ProjectName}.local'
+      Spec:
+        Provider:
+          VirtualRouter:
+            VirtualRouterName: email-vr
+  Route:
+    DependsOn:
+     - VirtualRouter
+     - EmailNode
+    Type: AWS::AppMesh::Route
+    Properties:
+      MeshName: !Ref MeshName
+      MeshOwner: !Ref MeshOwner
+      VirtualRouterName: email-vr
+      RouteName: email-route
+      Spec:
+        HttpRoute:
+          Action:
+            WeightedTargets:
+            - VirtualNode: email-vn
+              Weight: 1
+          Match:
+            Prefix: /

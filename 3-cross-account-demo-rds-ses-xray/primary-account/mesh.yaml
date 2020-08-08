@@ -1,0 +1,27 @@
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name to link stacks
+
+Resources:
+  Mesh:
+    Type: AWS::AppMesh::Mesh
+    Properties:
+      MeshName: !Sub '${ProjectName}-mesh'
+
+  BookNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties:
+      MeshName: !GetAtt Mesh.MeshName
+      VirtualNodeName: enquiry-vn
+      Spec:
+        Backends:
+        - VirtualService:
+            VirtualServiceName: !Sub 'dealer.versionone.${ProjectName}.local'
+        Listeners:
+        - PortMapping:
+            Port: 8081
+            Protocol: http
+        ServiceDiscovery:
+          DNS:
+            Hostname: !Sub 'enquiry.${ProjectName}.local'

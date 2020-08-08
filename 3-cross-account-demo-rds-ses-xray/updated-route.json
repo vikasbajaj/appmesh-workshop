@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "httpRoute": {
+      "action": {
+        "weightedTargets": [
+          {
+            "virtualNode": "dealer-vn-2",
+            "weight": 1
+          },
+          {
+            "virtualNode": "dealer-vn-1",
+            "weight": 1
+          }
+        ]
+      },
+      "match": {
+        "prefix": "/"
+      }
+    }
+  }
+}

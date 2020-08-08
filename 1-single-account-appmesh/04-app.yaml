@@ -1,0 +1,690 @@
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name to link stacks
+
+  DBUser:
+    Default: appmeshdemodb
+    NoEcho: 'true'
+    Description: The database admin account username
+    Type: String
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.
+
+  DBPassword:
+    Default: appmeshdemodb
+    NoEcho: 'true'
+    Description: The database admin account password
+    Type: String
+    MinLength: '1'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]+'
+    ConstraintDescription: must contain only alphanumeric characters.
+
+  SESSMTPEndPoint:
+    Description: SES SMTP endpoint
+    Type: String
+
+  SESSMTPUserName:
+    Description: SES SMTP Username
+    Type: String
+
+  SESSMTPPassowrd:
+    Description: SES SMTP Password
+    Type: String
+
+  EmailFrom:
+    Description: Email from which the email notification will be sent.
+    Type: String
+
+  EnvoyImage:
+    Type: String
+    Description: Envoy container image
+    Default: "840364872350.dkr.ecr.us-east-1.amazonaws.com/aws-appmesh-envoy:v1.12.4.0-prod"
+
+  BookCatalogueImage:
+    Type: String
+    Description: Book Catalogue container image
+    Default: "unleashcontainers/bookcatalogueservice:1.0"
+
+  BookCatalogueContainerPort:
+    Type: Number
+    Description: Port number to use for Book Catalogue service
+    Default: 8081
+
+  BookOrderImage:
+    Type: String
+    Description: Book Order container image
+    Default: "unleashcontainers/bookorderservice:1.0"
+
+  BookOrderContainerPort:
+    Type: Number
+    Description: Port number to use for Book Order service
+    Default: 8082
+ 
+  EmailNotificationImage:
+    Type: String
+    Description: email Notification container image
+    Default: "unleashcontainers/emailnotificationservice:1.0"
+
+  EmailNotificationContainerPort:
+    Type: Number
+    Description: Port number to use for Email Notification service
+    Default: 8083
+  
+  AWSXRayDaemonImage:
+    Type: String
+    Description: AWS X-Ray Daemon container image
+    Default: "amazon/aws-xray-daemon:1"
+
+  AWSXRayDaemonPort:
+    Type: Number
+    Description: AWS X-Ray Daemon container port
+    Default: 2000
+
+Resources:
+  # For each service, 
+    # TargetGroup
+    # LoadBalancerListenerRule
+    # CloudMap registry
+    # ECS Task Definition
+    # ECS Service 
+  BookCatalogueTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: '/bookcatalogue/healthcheck'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetType: ip
+      Name: 'bookcatalogue-tg'
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: 120
+      VpcId:
+        Fn::ImportValue: !Sub '${ProjectName}:VPC'
+
+  BookCatalogueALBRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - TargetGroupArn: !Ref BookCatalogueTargetGroup
+        Type: 'forward'
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - '/bookcatalogue/*'
+      ListenerArn: 
+        Fn::ImportValue: !Sub '${ProjectName}:PublicLoadBalancerListener'
+      Priority: 1
+
+  BookCatalogueRegistry:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: 'bookcatalogue'
+      DnsConfig:
+        NamespaceId:
+          Fn::ImportValue: !Sub '${ProjectName}:ECSServiceDiscoveryNamespace'
+        DnsRecords:
+        - Type: A
+          TTL: 60
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  BookCatalogueTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities:
+      - 'FARGATE'
+      TaskRoleArn: 
+        Fn::ImportValue: !Sub '${ProjectName}:TaskIamRole'
+      NetworkMode: 'awsvpc'
+      Family: !Sub '${ProjectName}-bookcatalogue'
+      ExecutionRoleArn: 
+        Fn::ImportValue: !Sub '${ProjectName}:TaskExecutionIamRole'
+      Cpu: 1024
+      Memory: 2048
+      ContainerDefinitions:
+      - Name: 'bookcatalouge'
+        Image: !Ref BookCatalogueImage
+        Essential: true
+        DependsOn:
+        - Condition: HEALTHY
+          ContainerName: envoy
+        PortMappings:
+        - ContainerPort: !Ref BookCatalogueContainerPort
+          Protocol: 'tcp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'bookcatalogue'
+        Environment:
+        - Name: 'BOOK_CATALOGUE_SERVICE_DB_URL'
+          Value: 
+            Fn::ImportValue: !Sub '${ProjectName}:RDSJDBCString'
+        - Name: 'BOOK_CATALOGUE_SERVICE_DB_USERNAME'
+          Value: !Ref DBUser
+        - Name: 'BOOK_CATALOGUE_SERVICE_DB_PASSWORD'
+          Value: !Ref DBPassword
+        - Name: 'BOOK_ORDER_SERVICE_PLACEORDER_ENDPOINT'
+          Value:
+            Fn::Join:
+            - ""
+            - - 'http://'
+              - Fn::ImportValue: !Sub '${ProjectName}:BookOrderVirtualService'
+              - ':'
+              - !Ref BookOrderContainerPort
+              - '/bookorder/orders'
+        - Name: 'NOTIFICATION_SERVICE_SENDNOTIFICATION_ENDPOINT'
+          Value:
+            Fn::Join:
+            - ""
+            - - 'http://'
+              - Fn::ImportValue: !Sub '${ProjectName}:EmailNotificationVirtualService'
+              - ':'
+              - !Ref EmailNotificationContainerPort
+              - '/emailnotification/notify'
+      - Name: 'xray-daemon'
+        Image: !Ref AWSXRayDaemonImage
+        Essential: true
+        DependsOn:
+        - Condition: HEALTHY
+          ContainerName: envoy
+        PortMappings:
+        - ContainerPort: !Ref AWSXRayDaemonPort
+          Protocol: 'udp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'xray-appmeshdemo'
+      - Name: envoy
+        Image: !Ref EnvoyImage
+        Essential: true
+        User: '1337'
+        HealthCheck:
+          Command:
+          - CMD-SHELL
+          - curl -s http://localhost:9901/server_info | grep state | grep -q LIVE
+          Interval: 5
+          Retries: 3
+          StartPeriod: 10
+          Timeout: 2
+        Ulimits:
+        - Name: "nofile"
+          HardLimit: 15000
+          SoftLimit: 15000
+        PortMappings:
+        - ContainerPort: 9901
+          Protocol: 'tcp'
+        - ContainerPort: 15000
+          Protocol: 'tcp'
+        - ContainerPort: 15001
+          Protocol: 'tcp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'bookcatalogue-envoy'
+        Environment:
+        - Name: 'APPMESH_VIRTUAL_NODE_NAME'
+          #Value: !Sub 'mesh/${ProjectName}-mesh/virtualNode/bookcatalogue-vnode' #need to import from output of 03-mesh.yaml
+          Value:
+            Fn::Join:
+            - ""
+            - - !Sub 'mesh/${ProjectName}-mesh/virtualNode/'
+              - Fn::ImportValue: !Sub '${ProjectName}:BookCatalogueNode'
+        - Name: 'ENVOY_LOG_LEVEL'
+          Value: 'trace'
+        - Name: 'ENABLE_ENVOY_XRAY_TRACING'
+          Value: 1 
+      ProxyConfiguration:
+        Type: 'APPMESH'
+        ContainerName: 'envoy'
+        ProxyConfigurationProperties:
+        - Name: 'IgnoredUID'
+          Value: '1337'
+        - Name: 'ProxyIngressPort'
+          Value: '15000'
+        - Name: 'ProxyEgressPort'
+          Value: '15001'
+        - Name: 'EgressIgnoredPorts'
+          Value: '3306'  
+        - Name: 'AppPorts'
+          Value: !Sub '${BookCatalogueContainerPort}'
+        - Name: 'EgressIgnoredIPs'
+          Value: '169.254.170.2,169.254.169.254'
+
+  BookCatalogueService:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - BookCatalogueALBRule
+    Properties:
+      TaskDefinition: !Ref BookCatalogueTaskDef
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      Cluster: 
+        Fn::ImportValue: !Sub '${ProjectName}:ECSCluster'
+      ServiceName: bookcatalouge-svc
+      SchedulingStrategy: REPLICA
+      DesiredCount: 1
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      DeploymentController:
+        Type: ECS  #Rolling update      
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+          - Fn::ImportValue: !Sub '${ProjectName}:TaskSecurityGroup'
+          Subnets:
+          - Fn::ImportValue: !Sub '${ProjectName}:PrivateSubnet1'
+          - Fn::ImportValue: !Sub '${ProjectName}:PrivateSubnet2'
+      HealthCheckGracePeriodSeconds: 150
+      LoadBalancers:
+      - ContainerName: bookcatalouge
+        ContainerPort: !Ref BookCatalogueContainerPort
+        TargetGroupArn: !Ref BookCatalogueTargetGroup
+      ServiceRegistries:
+      - RegistryArn: !GetAtt 'BookCatalogueRegistry.Arn'
+    
+  BookOrderTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: '/bookorder/healthcheck'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetType: ip
+      Name: 'bookorder-tg'
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: 120
+      VpcId:
+        Fn::ImportValue: !Sub '${ProjectName}:VPC'      
+
+  BookOrderALBRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - TargetGroupArn: !Ref BookOrderTargetGroup
+        Type: 'forward'
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - '/bookorder/*'
+      ListenerArn: 
+        Fn::ImportValue: !Sub '${ProjectName}:PublicLoadBalancerListener'
+      Priority: 2
+
+  BookOrderRegistry:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: 'bookorder'
+      DnsConfig:
+        NamespaceId:
+          Fn::ImportValue: !Sub '${ProjectName}:ECSServiceDiscoveryNamespace'
+        DnsRecords:
+        - Type: A
+          TTL: 60
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  BookOrderTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities:
+      - 'FARGATE'
+      TaskRoleArn: 
+        Fn::ImportValue: !Sub '${ProjectName}:TaskIamRole'
+      NetworkMode: 'awsvpc'
+      Family: !Sub '${ProjectName}-bookorder'
+      ExecutionRoleArn: 
+        Fn::ImportValue: !Sub '${ProjectName}:TaskExecutionIamRole'
+      Cpu: 1024
+      Memory: 2048
+      ContainerDefinitions:
+      - Name: 'bookorder'
+        Image: !Ref BookOrderImage
+        Essential: true
+        DependsOn:
+        - Condition: HEALTHY
+          ContainerName: envoy
+        PortMappings:
+        - ContainerPort: !Ref BookOrderContainerPort
+          Protocol: 'tcp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'bookorder'
+        Environment:
+        - Name: 'BOOK_ORDER_SERVICE_DB_URL'
+          Value: 
+            Fn::ImportValue: !Sub '${ProjectName}:RDSJDBCString'
+        - Name: 'BOOK_ORDER_SERVICE_DB_USERNAME'
+          Value: !Ref DBUser
+        - Name: 'BOOK_ORDER_SERVICE_DB_PASSWORD'
+          Value: !Ref DBPassword
+        - Name: 'NOTIFICATION_SERVICE_SENDNOTIFICATION_ENDPOINT'
+          Value:
+            Fn::Join:
+            - ""
+            - - 'http://'
+              - Fn::ImportValue: !Sub '${ProjectName}:EmailNotificationVirtualService'
+              - ':'
+              - !Ref EmailNotificationContainerPort
+              - '/emailnotification/notify'
+      - Name: 'xray-daemon'
+        Image: !Ref AWSXRayDaemonImage
+        Essential: true
+        DependsOn:
+        - Condition: HEALTHY
+          ContainerName: envoy
+        PortMappings:
+        - ContainerPort: !Ref AWSXRayDaemonPort
+          Protocol: 'udp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'xray-appmeshdemo'
+      - Name: envoy
+        Image: !Ref EnvoyImage
+        Essential: true
+        User: '1337'
+        HealthCheck:
+          Command:
+          - CMD-SHELL
+          - curl -s http://localhost:9901/server_info | grep state | grep -q LIVE
+          Interval: 5
+          Retries: 3
+          StartPeriod: 10
+          Timeout: 2
+        Ulimits:
+        - Name: "nofile"
+          HardLimit: 15000
+          SoftLimit: 15000
+        PortMappings:
+        - ContainerPort: 9901
+          Protocol: 'tcp'
+        - ContainerPort: 15000
+          Protocol: 'tcp'
+        - ContainerPort: 15001
+          Protocol: 'tcp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'bookorder-envoy'
+        Environment:
+        - Name: 'APPMESH_VIRTUAL_NODE_NAME'
+          #Value: !Sub 'mesh/${ProjectName}-mesh/virtualNode/bookorder-vnode' #need to import from output of 03-mesh.yaml
+          Value:
+            Fn::Join:
+            - ""
+            - - !Sub 'mesh/${ProjectName}-mesh/virtualNode/'
+              - Fn::ImportValue: !Sub '${ProjectName}:BookOrderNode'
+        - Name: 'ENVOY_LOG_LEVEL'
+          Value: 'trace'
+        - Name: 'ENABLE_ENVOY_XRAY_TRACING'
+          Value: 1 
+      ProxyConfiguration:
+        Type: 'APPMESH'
+        ContainerName: 'envoy'
+        ProxyConfigurationProperties:
+        - Name: 'IgnoredUID'
+          Value: '1337'
+        - Name: 'ProxyIngressPort'
+          Value: '15000'
+        - Name: 'ProxyEgressPort'
+          Value: '15001'
+        - Name: 'EgressIgnoredPorts'
+          Value: '3306'  
+        - Name: 'AppPorts'
+          Value: !Sub '${BookOrderContainerPort}'
+        - Name: 'EgressIgnoredIPs'
+          Value: '169.254.170.2,169.254.169.254'
+
+  BookOrderService:
+    Type: AWS::ECS::Service
+    #DependsOn:
+    #- BookCatalogueALBRule
+    Properties:
+      TaskDefinition: !Ref BookOrderTaskDef
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      Cluster: 
+        Fn::ImportValue: !Sub '${ProjectName}:ECSCluster'
+      ServiceName: bookorder-svc
+      SchedulingStrategy: REPLICA
+      DesiredCount: 1
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      DeploymentController:
+        Type: ECS  #Rolling update      
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+          - Fn::ImportValue: !Sub '${ProjectName}:TaskSecurityGroup'
+          Subnets:
+          - Fn::ImportValue: !Sub '${ProjectName}:PrivateSubnet1'
+          - Fn::ImportValue: !Sub '${ProjectName}:PrivateSubnet2'
+      HealthCheckGracePeriodSeconds: 150
+      LoadBalancers:
+      - ContainerName: bookorder
+        ContainerPort: !Ref BookOrderContainerPort
+        TargetGroupArn: !Ref BookOrderTargetGroup
+      ServiceRegistries:
+      - RegistryArn: !GetAtt 'BookOrderRegistry.Arn'
+
+  EmailNotificationTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: '/emailnotification/healthcheck'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetType: ip
+      Name: 'notification-tg'
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: 120
+      VpcId:
+        Fn::ImportValue: !Sub '${ProjectName}:VPC'            
+ 
+  EmailNotificationALBRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - TargetGroupArn: !Ref EmailNotificationTargetGroup
+        Type: 'forward'
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - '/emailnotification/*'
+      ListenerArn: 
+        Fn::ImportValue: !Sub '${ProjectName}:PublicLoadBalancerListener'
+      Priority: 3    
+  
+  EmailNotificationRegistry:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: 'emailnotification'
+      DnsConfig:
+        NamespaceId:
+          Fn::ImportValue: !Sub '${ProjectName}:ECSServiceDiscoveryNamespace'
+        DnsRecords:
+        - Type: A
+          TTL: 60
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+  
+  EmailNotificationTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities:
+      - 'FARGATE'
+      TaskRoleArn: 
+        Fn::ImportValue: !Sub '${ProjectName}:TaskIamRole'
+      NetworkMode: 'awsvpc'
+      Family: !Sub '${ProjectName}-emailnotification'
+      ExecutionRoleArn: 
+        Fn::ImportValue: !Sub '${ProjectName}:TaskExecutionIamRole'
+      Cpu: 1024
+      Memory: 2048
+      ContainerDefinitions:
+      - Name: 'emailnotification'
+        Image: !Ref EmailNotificationImage
+        Essential: true
+        DependsOn:
+        - Condition: HEALTHY
+          ContainerName: envoy
+        PortMappings:
+        - ContainerPort: !Ref EmailNotificationContainerPort
+          Protocol: 'tcp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'emailnotification'
+        Environment:
+        - Name: AWS_SES_SMTP_ENDPOINT
+          Value: !Ref SESSMTPEndPoint
+        - Name: AWS_SES_SMTP_USERNAME
+          Value: !Ref SESSMTPUserName
+        - Name: AWS_SES_SMTP_PASSWORD
+          Value: !Ref SESSMTPPassowrd
+        - Name: EMAIL_FROM
+          Value: !Ref EmailFrom
+      - Name: 'xray-daemon'
+        Image: !Ref AWSXRayDaemonImage
+        Essential: true
+        DependsOn:
+        - Condition: HEALTHY
+          ContainerName: envoy
+        PortMappings:
+        - ContainerPort: !Ref AWSXRayDaemonPort
+          Protocol: 'udp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'xray-appmeshdemo'
+      - Name: envoy
+        Image: !Ref EnvoyImage
+        Essential: true
+        User: '1337'
+        HealthCheck:
+          Command:
+          - CMD-SHELL
+          - curl -s http://localhost:9901/server_info | grep state | grep -q LIVE
+          Interval: 5
+          Retries: 3
+          StartPeriod: 10
+          Timeout: 2
+        Ulimits:
+        - Name: "nofile"
+          HardLimit: 15000
+          SoftLimit: 15000
+        PortMappings:
+        - ContainerPort: 9901
+          Protocol: 'tcp'
+        - ContainerPort: 15000
+          Protocol: 'tcp'
+        - ContainerPort: 15001
+          Protocol: 'tcp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'emailnotification-envoy'
+        Environment:
+        - Name: 'APPMESH_VIRTUAL_NODE_NAME'
+          Value:
+            Fn::Join:
+            - ""
+            - - !Sub 'mesh/${ProjectName}-mesh/virtualNode/'
+              - Fn::ImportValue: !Sub '${ProjectName}:EmailNotificationNode'
+        # Value: !Sub 'mesh/${ProjectName}-mesh/virtualNode/emailnotification-vnode' #need to import from output of 03-mesh.yaml
+        - Name: 'ENVOY_LOG_LEVEL'
+          Value: 'trace'
+        - Name: 'ENABLE_ENVOY_XRAY_TRACING'
+          Value: 1 
+      ProxyConfiguration:
+        Type: 'APPMESH'
+        ContainerName: 'envoy'
+        ProxyConfigurationProperties:
+        - Name: 'IgnoredUID'
+          Value: '1337'
+        - Name: 'ProxyIngressPort'
+          Value: '15000'
+        - Name: 'ProxyEgressPort'
+          Value: '15001'
+        - Name: 'EgressIgnoredPorts'
+          Value: '587'  
+        - Name: 'AppPorts'
+          Value: !Sub '${EmailNotificationContainerPort}'
+        - Name: 'EgressIgnoredIPs'
+          Value: '169.254.170.2,169.254.169.254'
+  EmailNotificationService:
+    Type: AWS::ECS::Service
+    #DependsOn:
+    #- BookCatalogueALBRule
+    Properties:
+      TaskDefinition: !Ref EmailNotificationTaskDef
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      Cluster: 
+        Fn::ImportValue: !Sub '${ProjectName}:ECSCluster'
+      ServiceName: emailnotification-svc
+      SchedulingStrategy: REPLICA
+      DesiredCount: 1
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      DeploymentController:
+        Type: ECS  #Rolling update      
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+          - Fn::ImportValue: !Sub '${ProjectName}:TaskSecurityGroup'
+          Subnets:
+          - Fn::ImportValue: !Sub '${ProjectName}:PrivateSubnet1'
+          - Fn::ImportValue: !Sub '${ProjectName}:PrivateSubnet2'
+      HealthCheckGracePeriodSeconds: 150
+      LoadBalancers:
+      - ContainerName: emailnotification
+        ContainerPort: !Ref EmailNotificationContainerPort
+        TargetGroupArn: !Ref EmailNotificationTargetGroup
+      ServiceRegistries:
+      - RegistryArn: !GetAtt 'EmailNotificationRegistry.Arn'
+  

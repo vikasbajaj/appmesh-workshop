@@ -1,0 +1,335 @@
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name to link stacks
+
+  EnvoyImage:
+    Type: String
+    Description: Envoy container image
+
+  EnquiryImage:
+    Type: String
+    Description: Enquiry API container image
+
+  ContainerPort:
+    Type: Number
+    Description: Port number to use for applications
+    Default: 8081
+
+  DealerPort:
+    Type: Number
+    Description: Dealer API Port
+    Default: 8083
+
+  DBUser:
+    Type: String
+    Description: Database user
+
+  DBPassword:
+    Type: String
+    Description: Database password
+  
+  DBName:
+    Type: String
+    Description: Database Name
+
+Resources:
+  PublicLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Access to the public facing load balancer'
+      VpcId:
+        Fn::ImportValue: !Sub '${ProjectName}:VPC'
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        IpProtocol: -1
+
+  PublicLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '30'
+      Subnets:
+      - Fn::ImportValue: !Sub '${ProjectName}:PublicSubnet1'
+      - Fn::ImportValue: !Sub '${ProjectName}:PublicSubnet2'
+      SecurityGroups:
+      - !Ref PublicLoadBalancerSecurityGroup
+
+  WebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: '/'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetType: ip
+      Name: !Sub '${ProjectName}-temp-target'
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: 120
+      VpcId:
+        Fn::ImportValue: !Sub '${ProjectName}:VPC'
+  
+  EnquiryTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: '/enquiry/healthcheck'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetType: ip
+      Name: 'enquiry-tg'
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: 120
+      VpcId:
+        Fn::ImportValue: !Sub '${ProjectName}:VPC'
+
+  PublicLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - TargetGroupArn: !Ref WebTargetGroup
+        Type: 'forward'
+      LoadBalancerArn: !Ref PublicLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  WebLoadBalancerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - TargetGroupArn: !Ref WebTargetGroup
+        Type: 'forward'
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - '*'
+      ListenerArn: !Ref PublicLoadBalancerListener
+      Priority: 2
+
+  EnquiryALBRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - TargetGroupArn: !Ref EnquiryTargetGroup
+        Type: 'forward'
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - '/enquiry/*'
+      ListenerArn: !Ref PublicLoadBalancerListener
+      Priority: 1
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '${ProjectName}-log-group'
+      RetentionInDays: 30
+
+  TaskIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": { "Service": [ "ecs-tasks.amazonaws.com" ]},
+            "Action": [ "sts:AssumeRole" ]
+          }]
+        }
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/CloudWatchFullAccess
+      - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
+
+  TaskExecutionIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": { "Service": [ "ecs-tasks.amazonaws.com" ]},
+            "Action": [ "sts:AssumeRole" ]
+          }]
+        }
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  EnquiryRegistry:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: 'enquiry'
+      DnsConfig:
+        NamespaceId:
+          Fn::ImportValue: !Sub '${ProjectName}:ECSServiceDiscoveryNamespace'
+        DnsRecords:
+        - Type: A
+          TTL: 60
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+
+  EquiryTaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities:
+      - 'FARGATE'
+      Family: !Sub '${ProjectName}-enquiry'
+      NetworkMode: 'awsvpc'
+      Cpu: 1024
+      Memory: 2048
+      TaskRoleArn: !Ref TaskIamRole
+      ExecutionRoleArn: !Ref TaskExecutionIamRole
+      ProxyConfiguration:
+        Type: 'APPMESH'
+        ContainerName: 'envoy'
+        ProxyConfigurationProperties:
+        - Name: 'IgnoredUID'
+          Value: '1337'
+        - Name: 'ProxyIngressPort'
+          Value: '15000'
+        - Name: 'ProxyEgressPort'
+          Value: '15001'
+        - Name: 'EgressIgnoredPorts'
+          Value: '3306'  
+        - Name: 'AppPorts'
+          Value: !Sub '${ContainerPort}'
+        - Name: 'EgressIgnoredIPs'
+          Value: '169.254.170.2,169.254.169.254'
+      ContainerDefinitions:
+      - Name: 'enquiry'
+        Image: !Ref EnquiryImage
+        Essential: true
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'enquiry'
+        PortMappings:
+        - ContainerPort: !Ref ContainerPort
+          Protocol: 'tcp'
+        DependsOn:
+        - Condition: HEALTHY
+          ContainerName: envoy
+        Environment:
+        - Name: 'RDS_DNS_ENDPOINT'
+          Value: 
+            Fn::ImportValue: !Sub '${ProjectName}:RDSEndpoint'
+        - Name: 'EXTERNAL_API'
+          Value: 'http://dummy.restapiexample.com/api/v1/employees'
+        - Name: 'DB_USER'
+          Value: !Ref DBUser
+        - Name: 'DB_PWD'
+          Value: !Ref DBPassword
+        - Name: 'DB_NAME'
+          Value: !Ref DBName  
+        - Name: 'DEALER_API_ENDPOINT'
+          Value:
+            Fn::Join:
+            - ""
+            - - 'http://'
+              - !Sub 'dealer.versionone.${ProjectName}.local'
+              - ':'
+              - !Ref DealerPort
+              - '/dealers/newenquiry' 
+      - Name: 'xray-daemon'
+        Image: amazon/aws-xray-daemon:1
+        Essential: true
+        DependsOn:
+        - Condition: HEALTHY
+          ContainerName: envoy
+        PortMappings:
+        - ContainerPort: 2000
+          Protocol: 'udp'
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'xray-appmeshdemo'
+      - Name: envoy
+        Image: !Ref EnvoyImage
+        Essential: true
+        User: '1337'
+        Ulimits:
+        - Name: "nofile"
+          HardLimit: 15000
+          SoftLimit: 15000
+        PortMappings:
+        - ContainerPort: 9901
+          Protocol: 'tcp'
+        - ContainerPort: 15000
+          Protocol: 'tcp'
+        - ContainerPort: 15001
+          Protocol: 'tcp'
+        HealthCheck:
+          Command:
+          - CMD-SHELL
+          - curl -s http://localhost:9901/server_info | grep state | grep -q LIVE
+          Interval: 5
+          Retries: 3
+          StartPeriod: 10
+          Timeout: 2
+        LogConfiguration:
+          LogDriver: 'awslogs'
+          Options:
+            awslogs-group: !Sub '${ProjectName}-log-group'
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: 'enquiry-envoy'
+        Environment:
+        - Name: 'APPMESH_VIRTUAL_NODE_NAME'
+          Value: !Sub 'mesh/${ProjectName}-mesh/virtualNode/enquiry-vn'
+        - Name: 'ENVOY_LOG_LEVEL'
+          Value: 'trace'
+        - Name: 'ENABLE_ENVOY_XRAY_TRACING'
+          Value: 1 
+  EnquiryService:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - EnquiryALBRule
+    Properties:
+      Cluster:
+        Fn::ImportValue: !Sub '${ProjectName}:ECSCluster'
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      DesiredCount: 1
+      LaunchType: FARGATE
+      ServiceRegistries:
+      - RegistryArn: !GetAtt 'EnquiryRegistry.Arn'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+          - Fn::ImportValue: !Sub '${ProjectName}:TaskSecurityGroup'
+          Subnets:
+          - Fn::ImportValue: !Sub '${ProjectName}:PrivateSubnet1'
+          - Fn::ImportValue: !Sub '${ProjectName}:PrivateSubnet2'
+      TaskDefinition: !Ref EquiryTaskDef
+      ServiceName: enquiry-svc
+      HealthCheckGracePeriodSeconds: 150
+      LoadBalancers:
+      - ContainerName: enquiry
+        ContainerPort: !Ref ContainerPort
+        TargetGroupArn: !Ref EnquiryTargetGroup
+Outputs:
+  PublicEndpoint:
+    Description: 'Public endpoint for the color client service'
+    Value: !Join ['', ['http://', !GetAtt 'PublicLoadBalancer.DNSName']]
+    Export:
+      Name: !Sub '${ProjectName}:PublicEndpoint'

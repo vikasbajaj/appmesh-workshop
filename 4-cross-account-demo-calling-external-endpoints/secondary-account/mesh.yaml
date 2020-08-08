@@ -1,0 +1,85 @@
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name to link stacks
+  MeshName:
+    Type: String
+    Description: Name of the shared mesh
+  MeshOwner:
+    Type: String
+    Description: Account Id of the owner of the mesh
+
+Resources:
+  DealerNode1:
+    Type: AWS::AppMesh::VirtualNode
+    Properties:
+      MeshName: !Ref MeshName
+      MeshOwner: !Ref MeshOwner
+      VirtualNodeName: dealer-vn-1
+      Spec:
+        Listeners:
+        - PortMapping:
+            Port: 8083
+            Protocol: http
+        ServiceDiscovery:
+          DNS:
+            Hostname: !Sub 'dealer.versionone.${ProjectName}.local'
+
+  DealerNode2:
+    Type: AWS::AppMesh::VirtualNode
+    Properties:
+      MeshName: !Ref MeshName
+      MeshOwner: !Ref MeshOwner
+      VirtualNodeName: dealer-vn-2
+      Spec:
+        Listeners:
+        - PortMapping:
+            Port: 8083
+            Protocol: http
+        ServiceDiscovery:
+          DNS:
+            Hostname: !Sub 'dealer.versiontwo.${ProjectName}.local'
+
+  VirtualRouter:
+    Type: AWS::AppMesh::VirtualRouter
+    Properties:
+      MeshName: !Ref MeshName
+      MeshOwner: !Ref MeshOwner
+      VirtualRouterName: dealer-vr
+      Spec:
+        Listeners:
+        - PortMapping:
+            Port: 8083
+            Protocol: http
+  
+  VirtualService:
+    DependsOn:
+     - VirtualRouter
+    Type: AWS::AppMesh::VirtualService
+    Properties:
+      MeshName: !Ref MeshName
+      MeshOwner: !Ref MeshOwner
+      VirtualServiceName: !Sub 'dealer.versionone.${ProjectName}.local'
+      Spec:
+        Provider:
+          VirtualRouter:
+            VirtualRouterName: dealer-vr
+  
+  Route:
+    DependsOn:
+     - VirtualRouter
+     - DealerNode1
+    Type: AWS::AppMesh::Route
+    Properties:
+      MeshName: !Ref MeshName
+      MeshOwner: !Ref MeshOwner
+      VirtualRouterName: dealer-vr
+      RouteName: weighted-route
+      Spec:
+        HttpRoute:
+          Action:
+            WeightedTargets:
+            - VirtualNode: dealer-vn-1
+              Weight: 1
+          Match:
+            Prefix: /

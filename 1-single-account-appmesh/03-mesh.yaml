@@ -1,0 +1,122 @@
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Project name to link stacks
+Resources:
+  Mesh:
+    Type: AWS::AppMesh::Mesh
+    Properties:
+      MeshName: !Sub '${ProjectName}-mesh'
+
+  EmailNotificationNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties:
+      MeshName: !GetAtt Mesh.MeshName
+      VirtualNodeName: emailnotification-vnode
+      Spec:
+        Listeners:
+        - PortMapping:
+            Port: 8083
+            Protocol: http
+        ServiceDiscovery:
+          DNS:
+            Hostname: !Sub 'emailnotification.${ProjectName}.local'
+
+  EmailNotificationVirtualService:
+    Type: "AWS::AppMesh::VirtualService"
+    Properties:
+      VirtualServiceName: !Sub 'emailnotification.${ProjectName}.local'
+      MeshName: !GetAtt Mesh.MeshName
+      Spec:
+        Provider:
+          VirtualNode:
+            VirtualNodeName: !GetAtt EmailNotificationNode.VirtualNodeName
+
+  BookOrderNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties:
+      MeshName: !GetAtt Mesh.MeshName
+      VirtualNodeName: bookorder-vnode
+      Spec:
+        Backends:
+        - VirtualService:
+            VirtualServiceName: !GetAtt EmailNotificationVirtualService.VirtualServiceName
+        Listeners:
+        - PortMapping:
+            Port: 8082
+            Protocol: http
+        ServiceDiscovery:
+          DNS:
+            Hostname: !Sub 'bookorder.${ProjectName}.local'
+
+  BookOrderVirtualService:
+    Type: "AWS::AppMesh::VirtualService"
+    Properties:
+      VirtualServiceName: !Sub 'bookorder.${ProjectName}.local'
+      MeshName: !GetAtt Mesh.MeshName
+      Spec:
+        Provider:
+          VirtualNode:
+            VirtualNodeName: !GetAtt BookOrderNode.VirtualNodeName
+
+  BookCatalogueNode:
+    Type: AWS::AppMesh::VirtualNode
+    Properties:
+      MeshName: !GetAtt Mesh.MeshName
+      VirtualNodeName: bookcatalogue-vnode
+      Spec:
+        Backends:
+        - VirtualService: 
+            VirtualServiceName: !GetAtt BookOrderVirtualService.VirtualServiceName
+        - VirtualService:
+            VirtualServiceName: !GetAtt EmailNotificationVirtualService.VirtualServiceName
+        Listeners:
+        - PortMapping:
+            Port: 8081
+            Protocol: http
+        ServiceDiscovery:
+          DNS:
+            Hostname: !Sub 'bookcatalogue.${ProjectName}.local'
+  BookCatalogueVirtualService:
+    Type: "AWS::AppMesh::VirtualService"
+    Properties:
+      VirtualServiceName: !Sub 'bookcatalogue.${ProjectName}.local'
+      MeshName: !GetAtt Mesh.MeshName
+      Spec:
+        Provider:
+          VirtualNode:
+            VirtualNodeName: !GetAtt BookCatalogueNode.VirtualNodeName
+  
+Outputs:
+  BookOrderNode:
+    Description: Book Order Node
+    Value: !GetAtt BookOrderNode.VirtualNodeName
+    Export:
+      Name: !Sub '${ProjectName}:BookOrderNode'
+  BookOrderVirtualService:
+    Description: Book Order Virtual Service Name
+    Value: !GetAtt BookOrderVirtualService.VirtualServiceName
+    Export:
+      Name: !Sub '${ProjectName}:BookOrderVirtualService'
+
+  BookCatalogueNode:
+    Description: Book Catalouge Node
+    Value: !GetAtt BookCatalogueNode.VirtualNodeName
+    Export:
+      Name: !Sub '${ProjectName}:BookCatalogueNode'
+  BookCatalogueVirtualService:
+    Description: Book Catalogue Virtual Service Name
+    Value: !GetAtt BookCatalogueVirtualService.VirtualServiceName
+    Export:
+      Name: !Sub '${ProjectName}:BookCatalogueVirtualService'
+
+  EmailNotificationNode:
+    Description: Email Notification Node
+    Value: !GetAtt EmailNotificationNode.VirtualNodeName
+    Export:
+      Name: !Sub '${ProjectName}:EmailNotificationNode'
+  EmailNotificationVirtualService:
+    Description: Book Catalogue Virtual Service Name
+    Value: !GetAtt EmailNotificationVirtualService.VirtualServiceName
+    Export:
+      Name: !Sub '${ProjectName}:EmailNotificationVirtualService'
