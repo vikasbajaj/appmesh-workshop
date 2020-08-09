@@ -39,7 +39,7 @@ This section shows how to use App Mesh between multiple accounts for cross accou
         
         Note: This key pair should be in the primary account. We will be creating a bastion host in the primary account.
    
-4. Once you have set all the variables, your **vars.env** should be like (we have put some example values for your reference only)
+- Once you have set all the variables, your **vars.env** should be like (I've used some sample values just for the explaination)
 
     ```
     unset AWS_ACCESS_KEY_ID
@@ -56,10 +56,10 @@ This section shows how to use App Mesh between multiple accounts for cross accou
     export EMAIL_IMAGE=unleashcontainers/emailnotificationservice:2.0
     ```
 
-5. To Source the `vars.env` file run the following location 
+- Set the environment variables
 
     ```
-    decode-appmesh/cross-account-appmesh-basic
+    $ cd appmesh-workshop/2-cross-account-appmesh
     
     ```
 
@@ -74,9 +74,9 @@ This section shows how to use App Mesh between multiple accounts for cross accou
 
     ```
 
-6. Let's put things in action by deploying all stacks in primary and secondary accounts by running the following command from 
+- Let's put things in action by deploying all stacks in primary and secondary accounts by running the following command from 
 
-    Note: run it from this location : decode-appmesh/cross-account-appmesh-basic
+    Note: run it from this location : appmesh-workshop/2-cross-account-appmesh
            
     ```
     ./deploy.sh deploy
@@ -84,14 +84,14 @@ This section shows how to use App Mesh between multiple accounts for cross accou
     ```
 ## Cross account mesh in action
 
-1. After a few minutes, the applications should be deployed and you will see an output such as:
+- After a few minutes, the applications should be deployed and you will see an output such as:
     ```
     Public endpoint:
     Application is available at http://test-Publi-1GPSQQLJIQ22I-188320172.us-east-1.elb.amazonaws.com
     ```
     http://test-Publi-1GPSQQLJIQ22I-188320172.us-east-1.elb.amazonaws.com is just an example, you will have a different DNS Endpoint
 
-2. Try curling the Book API. Update the <DNS_ENDPOINT> in following command with your application endpoint
+- Try curling the Book API. Update the <DNS_ENDPOINT> in following command with your application endpoint
  
     ```
     curl -X POST -H "Content-Type: application/json" -d "{\"name\":\"Cross Account App mesh\",\"price\":13.5,\"genre\":\"Technical\",\"authorname\":\"appmesh demo\",\"authoremailid\":\"youremail@testmail.com\"}" <DNS_ENDPOINT>/bookcatalogue/books -v
