@@ -167,14 +167,14 @@ Resources:
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: 'bookcatalogue'
         Environment:
-        - Name: 'BOOK_CATALOGUE_SERVICE_DB_URL'
+        - Name: 'DB_URL'
           Value: 
             Fn::ImportValue: !Sub '${ProjectName}:RDSJDBCString'
-        - Name: 'BOOK_CATALOGUE_SERVICE_DB_USERNAME'
+        - Name: 'DB_USERNAME'
           Value: !Ref DBUser
-        - Name: 'BOOK_CATALOGUE_SERVICE_DB_PASSWORD'
+        - Name: 'DB_PASSWORD'
           Value: !Ref DBPassword
-        - Name: 'BOOK_ORDER_SERVICE_PLACEORDER_ENDPOINT'
+        - Name: 'ORDER_ENDPOINT'
           Value:
             Fn::Join:
             - ""
@@ -183,7 +183,7 @@ Resources:
               - ':'
               - !Ref BookOrderContainerPort
               - '/bookorder/orders'
-        - Name: 'NOTIFICATION_SERVICE_SENDNOTIFICATION_ENDPOINT'
+        - Name: 'NOTIFICATION_ENDPOINT'
           Value:
             Fn::Join:
             - ""
@@ -375,14 +375,14 @@ Resources:
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: 'bookorder'
         Environment:
-        - Name: 'BOOK_ORDER_SERVICE_DB_URL'
+        - Name: 'DB_URL'
           Value: 
             Fn::ImportValue: !Sub '${ProjectName}:RDSJDBCString'
-        - Name: 'BOOK_ORDER_SERVICE_DB_USERNAME'
+        - Name: 'DB_USERNAME'
           Value: !Ref DBUser
-        - Name: 'BOOK_ORDER_SERVICE_DB_PASSWORD'
+        - Name: 'DB_PASSWORD'
           Value: !Ref DBPassword
-        - Name: 'NOTIFICATION_SERVICE_SENDNOTIFICATION_ENDPOINT'
+        - Name: 'NOTIFICATION_ENDPOINT'
           Value:
             Fn::Join:
             - ""

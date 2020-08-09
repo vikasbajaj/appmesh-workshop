@@ -376,6 +376,12 @@ Outputs:
     Export:
       Name: !Sub '${ProjectName}:PublicLoadBalancer'
 
+  ALBLoadBalancerDNSEndpoint:
+    Description: Public load balancer
+    Value: !GetAtt [PublicLoadBalancer, DNSName]
+    Export:
+      Name: !Sub '${ProjectName}:ALBLoadBalancerDNSEndpoint'
+
   PublicLoadBalancerListener:
     Description: Public Load Balancer (ALB) listener
     Value: !Ref PublicLoadBalancerListener
@@ -405,7 +411,11 @@ Outputs:
     Value: !Ref ECSServiceDiscoveryNamespace
     Export:
       Name: !Sub '${ProjectName}:ECSServiceDiscoveryNamespace'
-      
+  BastionSecurityGroup:
+    Description: The bastion security group
+    Value: !Ref BastionSecurityGroup
+    Export:
+      Name: !Sub '${ProjectName}:BastionSecurityGroup'
   BastionIp:
     Description: The ip address of the bastion host
     Value: !GetAtt Bastion.PublicIp

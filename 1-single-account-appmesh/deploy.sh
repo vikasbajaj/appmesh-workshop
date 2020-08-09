@@ -120,14 +120,6 @@ deploy_app(){
         --template-file "${DIR}/04-app.yaml" \
         --capabilities CAPABILITY_IAM \
         --parameter-overrides "ProjectName=${PROJECT_NAME}" "SESSMTPEndPoint=${SES_ENDPOINT}" "SESSMTPUserName=${SES_USER}" "SESSMTPPassowrd=${SES_PWD}" "EmailFrom=${EMAIL_FROM}"
-
-    EC2EndPoint=$(aws cloudformation describe-stacks \
-        --stack-name="${PROJECT_NAME}-infra" \
-        --query="Stacks[0].Outputs[?OutputKey=='BastionIp'].OutputValue" \
-        --output=text)
-
-    echo "EC2 Public IP -----------> ${EC2EndPoint}"
-
 }
 deploy_stacks() {
     deploy_infra
@@ -153,7 +145,25 @@ delete_stacks() {
     delete_cfn_stack "${PROJECT_NAME}-infra"
     echo "all resources for primary account have been deleted"
 }
+load_values(){
+    EC2EndPoint=$(aws cloudformation describe-stacks \
+        --stack-name="${PROJECT_NAME}-infra" \
+        --query="Stacks[0].Outputs[?OutputKey=='BastionIp'].OutputValue" \
+        --output=text)
 
+    ALBLoadBalancerDNSEndpoint=$(aws cloudformation describe-stacks \
+        --stack-name="${PROJECT_NAME}-infra" \
+        --query="Stacks[0].Outputs[?OutputKey=='ALBLoadBalancerDNSEndpoint'].OutputValue" \
+        --output=text)
+    RDSEndpoint=$(aws cloudformation describe-stacks \
+        --stack-name="${PROJECT_NAME}-rds" \
+        --query="Stacks[0].Outputs[?OutputKey=='RDSEndpoint'].OutputValue" \
+        --output=text)
+
+    echo "EC2 Public IP -----------> ${EC2EndPoint}"
+    echo "ALB DNS Endpopint is -----------> ${ALBLoadBalancerDNSEndpoint}"
+    echo "RDS DNS Endpoint is ----------> ${RDSEndpoint}"
+}
 action=${1:-"deploy"}
 
 if [ "$action" == "delete" ]; then
@@ -163,5 +173,6 @@ fi
 
 if [ "$action" == "deploy" ]; then
     deploy_stacks
+    load_values
     exit 0
 fi

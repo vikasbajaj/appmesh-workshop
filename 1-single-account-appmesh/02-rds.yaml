@@ -52,6 +52,11 @@ Resources:
           ToPort: '3306'
           SourceSecurityGroupId: 
             Fn::ImportValue: !Sub '${ProjectName}:TaskSecurityGroup'
+        - IpProtocol: tcp
+          FromPort: '3306'
+          ToPort: '3306'
+          SourceSecurityGroupId: 
+            Fn::ImportValue: !Sub '${ProjectName}:BastionSecurityGroup'
   RDSSubnetGroup: 
     Type: AWS::RDS::DBSubnetGroup
     Properties: 
@@ -79,3 +84,8 @@ Outputs:
     Value: !Join ['', ['jdbc:mysql://', !GetAtt [RDSInstance, Endpoint.Address], ':', !GetAtt [RDSInstance, Endpoint.Port], /, !Ref 'DBName']]
     Export: 
       Name: !Sub '${ProjectName}:RDSJDBCString'
+  RDSEndpoint:
+    Description: RDS DNS Endpoint
+    Value: !GetAtt [RDSInstance, Endpoint.Address]
+    Export: 
+      Name: !Sub '${ProjectName}:RDSEndpoint'
