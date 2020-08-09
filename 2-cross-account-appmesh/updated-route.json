@@ -5,7 +5,7 @@
         "weightedTargets": [
           {
             "virtualNode": "dealer-vn-2",
-            "weight": 1
+            "weight": 9
           },
           {
             "virtualNode": "dealer-vn-1",
