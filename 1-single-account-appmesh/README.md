@@ -1,4 +1,11 @@
-# single account appmesh workshop
+## Overview
+
+This section we will deploy 3 ECS services named, BookCatalogue Service, Book OrderService, and Email Notification Service with Appmesh configurnation in one AWS Account. BookCatalogue Service interacts with BookOrder service and Email Notification Service for the usecases such as Add New Book (BookCatalogue Service service interacts with RDS and EmailNotification Service), Delete & Update Book (BookCatalogue Service service interacts with RDS and EmailNotification Service), Place New Book Order (BookCatalogue Service service interacts with BookOrder service which interacts with RDS and EmailNotification Service). In all these usecases, EmailNotification service interacts with SES.
+
+### Take away from this section
+- ECS services interacting other ECS services via AppMesh
+- ECS services interacting with other VPC and non VPC services like RDS and SES via Appmesh.
+
 
 ![](images/Appmesh-single-account.png)
 
