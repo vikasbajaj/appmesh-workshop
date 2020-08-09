@@ -82,77 +82,69 @@ This section shows how to use App Mesh between multiple accounts for cross accou
     ./deploy.sh deploy
 
     ```
-## Cross account mesh in action
+- Once the installation is complete you will get ALB endpoint, Bastion IP and RDS Endpoint
+    - Application is available at <Application Load Balancer Endpoint>
+    - Bastion ip is <Bastion IP>
+    - RDS DNS Endpoint is <RDS DNS Endpoint>
 
-- After a few minutes, the applications should be deployed and you will see an output such as:
-    ```
-    Public endpoint:
-    Application is available at http://test-Publi-1GPSQQLJIQ22I-188320172.us-east-1.elb.amazonaws.com
-    ```
-    http://test-Publi-1GPSQQLJIQ22I-188320172.us-east-1.elb.amazonaws.com is just an example, you will have a different DNS Endpoint
+### Cross account mesh in action
 
-- Try curling the Book API. Update the <DNS_ENDPOINT> in following command with your application endpoint
- 
-    ```
-    curl -X POST -H "Content-Type: application/json" -d "{\"name\":\"Cross Account App mesh\",\"price\":13.5,\"genre\":\"Technical\",\"authorname\":\"appmesh demo\",\"authoremailid\":\"youremail@testmail.com\"}" <DNS_ENDPOINT>/bookcatalogue/books -v
-    
-    ```
-    ```
-    e.g.
+- Open new ssh session on your laptop and connect to EC2 instance and create Enquiry table in RDS
 
-    curl -X POST -H "Content-Type: application/json" -d "{\"name\":\"AWS Unleashed\",\"price\":15.5,\"genre\":\"Technical\",\"authorname\":\"ECS Workshop\",\"authoremailid\":\"testemail@gmail.com\"}" http://appme-Publi-1SCYCVAA02R5X-1518210722.us-east-1.elb.amazonaws.com/bookcatalogue/books -v
-
+- From your local ssh terminal
+    ```
+    $ ssh -i your-region-ec2.pem ec2-user@<Bastion IP>
     ```
 
-## Teardown
-When you are done with the example you can delete everything we created by running:
-    Note: run it from this location : decode-appmesh/cross-account-appmesh-basic
+- Within EC2
+
+    ```
+    $ sudo yum install mysql
+
+    $ mysql --host=<RDS DNS Endpoint> --user=appmeshdemodb --password=appmeshdemodb appmeshdemodb
+
+    $ CREATE TABLE `appmeshdemodb`.`enquiry` (
+        `id` INT NOT NULL AUTO_INCREMENT,
+        `buyername` VARCHAR(45) NOT NULL,
+        `buyeremailid` VARCHAR(100) NOT NULL,
+        `cartype` VARCHAR(45) NOT NULL,
+        `carbrand` VARCHAR(45) NOT NULL,
+        `carid` VARCHAR(45) NOT NULL,
+        PRIMARY KEY (`id`));
+    ```
+- Open a new local ssh terminal to test the application and use the following curl command to test if enquiry service that is deployed in your Primary Account is up and running.
+
+    ```
+    // This is just a health check to make sure enquiry service is up and running
+
+    curl <Application Load Balancer Endpoint>/enquiry/healthcheck
+    ```
+- Call a newenquiry service to create a new enquiry which internally calls the dealer service running in your secondary account, which sends an email to the email address that you configure in vars.env file. Replace ALB DNS endpoint with your environment ALB DNS endpoint.
+
+    ```
+     curl -X POST -H "Content-Type: application/json" -d "{\"buyername\":\"Vikas Bajaj\",\"cartype\":\"SUV\",\"carid\":\"ABC10101\",\"carbrand\":\"Toyota\",\"buyeremailid\":\"testemail@gmail.com\"}" curl http://appme-Publi-UD9MCWWH53I-583636019.us-east-1.elb.amazonaws.com/enquiry/newenquiry -v
+
+    ```
+- **you should receive an email from Dealer API version-1**
+
+- Let's deploy another version of Dealer API in the secondary account. Execute the following to deploy version 2 of Dealer service
+
+    ```
+    ./deploy.sh update-route
+    ```
+- Create aanother enquiry by calling the newenquiry api on Enquiry service
+    ```
+    curl -X POST -H "Content-Type: application/json" -d "{\"buyername\":\"Vikas Bajaj\",\"cartype\":\"SUV\",\"carid\":\"ABC10101\",\"carbrand\":\"Toyota\",\"buyeremailid\":\"testemail@gmail.com\"}" curl <Application Load Balancer Endpoint>/enquiry/newenquiry -v
+    ```
+
+- **you should receive an email from Dealer API version-2**
+
+### Teardown
+- When you are done with the section you can delete everything we created by running:
 
     ```
     ./deploy.sh delete
     ```
 
 
-### Book Image
 
-The book image is a microservice which listens on a **8081** port, exposes **/bookcatalogue/books** api which internally calls **/emailnotification/notify** api on email microservice on a **8083** port. 
-
-### Email Image
-
-The email image is a microservice which listens on a **8083** port, exposes **/emailnotification/notify** api. This is dummy api, only prints message "Email Sent", it doesn't actually send email. 
-
-## Setup
-
-------------------------------------------------------------
-Once the installation is complete you will get ALB endpoint, Bastion IP and RDS Endpoint
-
-# Application is available at <Application Load Balancer Endpoint>
-# Bastion ip is <Bastion IP>
-# RDS DNS Endpoint is <RDS DNS Endpoint>
-
-####New Terminal to create required table in the database######
-ssh -i your-region-ec2.pem ec2-user@<Bastion IP>
-$ sudo yum install mysql
-$ mysql --host=<RDS DNS Endpoint> --user=appmeshdemodb --password=appmeshdemodb appmeshdemodb
-$ CREATE TABLE `appmeshdemodb`.`enquiry` (
-    `id` INT NOT NULL AUTO_INCREMENT,
-    `buyername` VARCHAR(45) NOT NULL,
-    `buyeremailid` VARCHAR(100) NOT NULL,
-    `cartype` VARCHAR(45) NOT NULL,
-    `carbrand` VARCHAR(45) NOT NULL,
-    `carid` VARCHAR(45) NOT NULL,
-    PRIMARY KEY (`id`));
-
-####New Terminal 
-curl <Application Load Balancer Endpoint>/enquiry/healthcheck
-
-curl -X POST -H "Content-Type: application/json" -d "{\"buyername\":\"Vikas Bajaj\",\"cartype\":\"SUV\",\"carid\":\"ABC10101\",\"carbrand\":\"Toyota\",\"buyeremailid\":\"testemail@gmail.com\"}" curl http://appme-Publi-UD9MCWWH53I-583636019.us-east-1.elb.amazonaws.com/enquiry/newenquiry -v
-
-## you should receive an email from Dealer API version-1
-./deploy.sh update-route
-
-curl -X POST -H "Content-Type: application/json" -d "{\"buyername\":\"Vikas Bajaj\",\"cartype\":\"SUV\",\"carid\":\"ABC10101\",\"carbrand\":\"Toyota\",\"buyeremailid\":\"testemail@gmail.com\"}" curl <Application Load Balancer Endpoint>/enquiry/newenquiry -v
-## you should receive an email from Dealer API version-2
----------------------------------------------------------------
-
-https://docs.aws.amazon.com/cli/latest/reference/appmesh/update-route.html
