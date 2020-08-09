@@ -120,4 +120,4 @@ curl -X POST -H "Content-Type: application/json" -d "{\"bookid\":2,\"buyername\"
 
 ```
 
-#### You successfully testes ECS services deployed on ECS cluster with Appmesh configuration!
+#### You have successfully tested ECS services deployed on ECS cluster with Appmesh configuration!
