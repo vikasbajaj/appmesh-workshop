@@ -2,7 +2,16 @@
 
 This section shows how to use App Mesh between multiple accounts for cross account communication. In this section, we will create a VPC and Mesh in one account (the primary account) and share those resources with another account (the secondary account). We will then deploy applications into the mesh that show they are communicating on a single network, configured by App Mesh.
 
+### Prerequisites
+- Create an AWS Organisation in your AWS master account, Primary account in section is referring to Organisation master account
+- Create a secondary AWS account in AWS Organisation
+- In your secondary account, verify two Email addresses in SES
+- In your secondary account, perform SES SMTP setting and take a note of SES SMTP Server name (endpoint), SES SMTP username and password.
+
+
 ![](./CrossAccount.png)
+
+### Steps
 
 - Clone this repository and navigate to the 2-cross-account-appmesh folder, all commands should be run from this location.
     ```
