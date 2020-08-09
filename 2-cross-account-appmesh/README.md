@@ -8,6 +8,7 @@ This section shows how to use App Mesh between multiple accounts for cross accou
 - In your secondary account, verify two Email addresses in SES
 - In your secondary account, perform SES SMTP setting and take a note of SES SMTP Server name (endpoint), SES SMTP username and password.
 - To create Primary and Secondary AWS cli profiles, create an IAM user in the primary account another IAM users in secondary account and use the downloaded credentials to configure AWS Cli primary and secondary profiles.
+- Create a EC2 Key pair in the primary account
 
 
 ![](./CrossAccount.png)
